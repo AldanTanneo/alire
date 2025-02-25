@@ -20,7 +20,13 @@ package body Alire.Properties.Actions.Runners is
       Table : constant TOML.TOML_Value := TOML.Create_Table;
    begin
       Table.Set (TOML_Keys.Action_Type,    Tomify (This.Moment));
-      Table.Set (TOML_Keys.Action_Command, +This.Command_Line);
+      Table.Set
+        (TOML_Keys.Action_Command,
+         (case This.Command_Line.Kind is
+            when Builtin =>
+              (case This.Command_Line.Builtin is
+               when Alire_Test_Runner => +"alire_test_runner"),
+            when Shell_Command => +This.Command_Line.Cmd));
       if This.Working_Folder /= "" then
          Table.Set (TOML_Keys.Action_Folder,  +This.Working_Folder);
       end if;
@@ -60,6 +66,7 @@ package body Alire.Properties.Actions.Runners is
          Path     : TOML_Value;
          Has_Path : Boolean;
          Moment   : Moments;
+         Cmd      : Action_Command;
 
          function Is_Valid is new AAA.Enum_Tools.Is_Valid (Moments);
 
@@ -107,14 +114,23 @@ package body Alire.Properties.Actions.Runners is
                & ASCII.LF & "Offending name is: " & Name.As_String);
          end if;
 
-         if Command.Kind /= TOML_Array
+         if Command.Kind = TOML_String and then
+               Command.As_String = "alire_test_runner"
+         then
+            Cmd := (Builtin, Alire_Test_Runner);
+         elsif Command.Kind /= TOML_Array
            or else
             Command.Length = 0
            or else
             Command.Item (1).Kind /= TOML_String
          then
             From.Checked_Error
-              ("actions command must be an array of string(s)");
+              ("actions command must be an array of string(s)"
+               & " or a known builtin");
+         else
+            Cmd := (Shell_Command,
+                    TOML_Adapters.To_Vector
+                       (TOML_Adapters.To_Array (Command)));
          end if;
 
          From.Report_Extra_Keys;
@@ -127,8 +143,7 @@ package body Alire.Properties.Actions.Runners is
                Name                  =>
                  (if Has_Name then Name.As_String else ""),
 
-               Relative_Command_Line =>
-                 TOML_Adapters.To_Vector (TOML_Adapters.To_Array (Command)),
+               Command => Cmd,
 
                Working_Folder        =>
                  (if Has_Path then Path.As_String else ".")));

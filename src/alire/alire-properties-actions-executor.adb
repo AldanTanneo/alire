@@ -4,6 +4,7 @@ with Alire.Flags;
 with Alire.OS_Lib.Subprocess;
 with Alire.Properties.Actions.Runners;
 with Alire.Roots;
+with Alire.Test_Runner;
 with Alire.Utils.TTY;
 
 package body Alire.Properties.Actions.Executor is
@@ -69,40 +70,62 @@ package body Alire.Properties.Actions.Executor is
       use OS_Lib;
 
       Guard : Directories.Guard (Enter (This.Working_Folder))
-        with Unreferenced;
+      with Unreferenced;
       --  This presumes the action is being run from the crate root. This is
       --  true for post-build root crate actions, post-fetch deployments,
       --  test runs...
 
-      Cmd   : constant AAA.Strings.Vector := Prefix.Append (This.Command_Line);
-
-      Exec : String renames Cmd.First_Element;
+      Cmd : constant Runners.Action_Command := This.Command_Line;
    begin
-      Code := 0;
+      case Cmd.Kind is
+         when Runners.Builtin =>
+            case Cmd.Builtin is
+               when Runners.Alire_Test_Runner =>
+                  declare
+                     Root : Alire.Roots.Root := Alire.Roots.Load_Root (".");
+                  begin
+                     Alire.Test_Runner.Run (Root, Fails => Code);
+                  end;
+            end case;
 
-      if Alire.OS_Lib.Locate_Exec_On_Path (Exec) = "" and then
-        not GNAT.OS_Lib.Is_Executable_File (Exec)
-      then
-         Raise_Checked_Error
-           (Errors.New_Wrapper ("Cannot run action:")
-            .Wrap ("Command not found  [" & TTY.Terminal (Exec) & "]")
-            .Wrap ("Working directory  [" & TTY.URL (Current) & "]")
-            .Wrap ("Action description [" & This.Image & "]").Get);
-      end if;
+         when Runners.Shell_Command =>
+            declare
+               Cmd_With_Prefix : constant AAA.Strings.Vector :=
+                 Prefix.Append (Cmd.Cmd);
+               Exec            : constant String :=
+                 Cmd_With_Prefix.First_Element;
+               Args            : constant AAA.Strings.Vector :=
+                 Cmd_With_Prefix.Tail;
+            begin
+               Code := 0;
+               if Alire.OS_Lib.Locate_Exec_On_Path (Exec) = ""
+                 and then not GNAT.OS_Lib.Is_Executable_File (Exec)
+               then
+                  Raise_Checked_Error
+                    (Errors.New_Wrapper ("Cannot run action:").Wrap
+                       ("Command not found  [" & TTY.Terminal (Exec) & "]")
+                       .Wrap ("Working directory  [" & TTY.URL (Current) & "]")
+                       .Wrap ("Action description [" & This.Image & "]")
+                       .Get);
+               end if;
 
-      if Capture then
-         Code := Subprocess.Unchecked_Spawn_And_Capture
-           (Command             => Cmd.First_Element,
-            Arguments           => Cmd.Tail,
-            Output              => Output,
-            Understands_Verbose => False,
-            Err_To_Out          => Err_To_Out);
-      else
-         Code := Subprocess.Unchecked_Spawn
-           (Command             => Cmd.First_Element,
-            Arguments           => Cmd.Tail,
-            Understands_Verbose => False);
-      end if;
+               if Capture then
+                  Code :=
+                    Subprocess.Unchecked_Spawn_And_Capture
+                      (Command             => Exec,
+                       Arguments           => Args,
+                       Output              => Output,
+                       Understands_Verbose => False,
+                       Err_To_Out          => Err_To_Out);
+               else
+                  Code :=
+                    Subprocess.Unchecked_Spawn
+                      (Command             => Exec,
+                       Arguments           => Args,
+                       Understands_Verbose => False);
+               end if;
+            end;
+      end case;
    end Execute_Run;
 
    ---------------------
